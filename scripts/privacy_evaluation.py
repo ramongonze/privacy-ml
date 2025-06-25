@@ -4,7 +4,7 @@ import math
 import functools
 import numpy as np
 import pandas as pd
-from mechanisms import krr, geometric_truncated
+from mechanisms import krr
 from tqdm.auto import tqdm
 import sys
 import os
@@ -41,7 +41,17 @@ def make_guess(predictions:list, confidences:list[float]):
     # Choose randomly one value from the argmax set
     return np.random.choice(candidates)
 
-def attribute_inference_acc(dataset_path:str, qids:list[str], target:str, sensitive:str, domain_sensitive:list, M, A):
+def attribute_inference_acc(
+        dataset_path:str,
+        qids:list[str],
+        target:str,
+        sensitive:str,
+        domain_sensitive:list,
+        M,
+        A,
+        dp=False,
+        epsilon=math.log(2)
+    ):
     """Adversary's accuracy when trying to guess the sensitive attribute value. The evaluation is done considering all individuals in the original dataset as possible targets. The accuracy is the number of individuals the adversary guessed correctly the sensitive attribute using the attack model.
 
     Parameters:
@@ -52,6 +62,8 @@ def attribute_inference_acc(dataset_path:str, qids:list[str], target:str, sensit
         domain_sensitive (list): Domain of the sensitive attribute.
         M: Target model. It must implement the method 'predict' that returns, for each instance, an array of confidences (same order as 'domain_sensitive').
         A: Attack model. It must implement the method 'predict' that returns, for each instance, an array of confidences (same order as 'domain_sensitive').
+        dp (bool): Whether to apply noise in the prediction of M. The noise is going to be added using kRR mechanism and the privacy level is passed through parameter `epsilon`.Default is False.
+        epsilon (float): Privacy parameter. Is is used only when `dp`=True.
 
     Returns:
         accuracy (float): Adversary's accuracy.
@@ -66,16 +78,21 @@ def attribute_inference_acc(dataset_path:str, qids:list[str], target:str, sensit
         individual_qids = data_ori.loc[i][qids].tolist() # Individual's QID
         individual_sensitive = data_ori.loc[i][sensitive] # Individual's real sensitive value
 
+        # STEP 3 #############
         # Build tuples of (qids,sensitive) to be passed through M to get the target predictions
         features_prediction = [individual_qids + [value] for value in domain_sensitive]
         features_prediction = pd.DataFrame(features_prediction, columns=qids + [sensitive])
         target_confidences = M.predict(features_prediction)
         target_predictions = [domain_sensitive[np.argmax(c)] for c in target_confidences]
+        
+        if dp:
+            target_predictions = [krr(c, domain_sensitive, epsilon) for c in target_predictions]
 
         # Build the dataset to pass through A
         features_attack = features_prediction[qids] # QID values
         features_attack[target] = target_predictions # Predictions from M
 
+        # STEP 4 #############
         # Get predictions and confidences for the sensitive attribute
         sensitive_confidences = A.predict(features_attack)
         sensitive_predictions = [domain_sensitive[np.argmax(c)] for c in sensitive_confidences]
