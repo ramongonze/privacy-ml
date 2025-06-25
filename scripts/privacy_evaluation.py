@@ -41,7 +41,7 @@ def make_guess(predictions:list, confidences:list[float]):
     # Choose randomly one value from the argmax set
     return np.random.choice(candidates)
 
-def attribute_inference_acc(
+def model_inversion_acc(
         dataset_path:str,
         qids:list[str],
         target:str,
