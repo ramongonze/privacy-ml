@@ -19,7 +19,7 @@ def attack(results_path, dataset_path, qids, target, sensitive, domain_sensitive
     epsilons = [0.1, 0.5, 1, 10, 20, 50, 100]
 
     # Write header
-    with open(results_path) as f:
+    with open(results_path, "w") as f:
         f.write("target_model,attack_model,dp,epsilon,accuracy\n")
          
     for M_name, M in all_M.items(): # Target model
@@ -37,7 +37,7 @@ def attack(results_path, dataset_path, qids, target, sensitive, domain_sensitive
                         dp=dp,
                         epsilon=ep
                     )
-                    with open(results_path) as f:
+                    with open(results_path, "a") as f:
                         f.write(f"{M_name},{A_name},{dp},{ep},{acc:.10f}\n")
             else:
                 acc = model_inversion_acc(
@@ -50,7 +50,7 @@ def attack(results_path, dataset_path, qids, target, sensitive, domain_sensitive
                     A=A,
                     dp=dp
                 )
-                with open(results_path) as f:
+                with open(results_path, "a") as f:
                     f.write(f"{M_name},{A_name},False,None,{acc:.10f}\n")
 
 def main():
