@@ -25,7 +25,7 @@ def main():
         # Apply noise individually in each column
         data_san = data.copy()
         for col in tqdm(cols, desc=f"Sanitizing columns for epsilon = {epsilon}"):
-            data_san[col].apply(lambda x: krr(x, domains[col], epsilon/len(cols)))
+            data_san[col] = data_san[col].apply(lambda x: krr(x, domains[col], epsilon/len(cols)))
 
         # Save sanitized dataset
         data_san.to_csv(os.path.join(RESULTS_PATH, f"hospitals_san_{epsilon}.csv"), index=False)
