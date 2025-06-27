@@ -60,7 +60,7 @@ def main():
     adult_qids = ["age", "workclass", "occupation", "sex", "education", "native-country", "marital-status"]
     adult_target = "income"
     adult_sensitive = "race"
-    adult_domain_sensitive = ["Female", "Male"]
+    adult_domain_sensitive = ["Asian-Pac-Islander", "Amer-Indian-Eskimo", "Black", "Other", "White"]
     
     # Hospitals
     hospitals_dataset_path = os.path.join(REPOSITORY_PATH, "data/hospitals/hospitals_pp.csv")
