@@ -28,7 +28,7 @@ def main():
             
             # Geometric truncated for age and kRR for the other attributes
             if col == "age":
-                data_san[col].apply(
+                data_san[col] = data_san[col].apply(
                     lambda x: geometric_truncated(
                         x=x,
                         lower=min(domains[col]),
@@ -37,7 +37,7 @@ def main():
                     )
                 )
             else:
-                data_san[col].apply(lambda x: krr(x, domains[col], epsilon/len(cols)))
+                data_san[col] = data_san[col].apply(lambda x: krr(x, domains[col], epsilon/len(cols)))
 
         # Save sanitized dataset
         data_san.to_csv(os.path.join(RESULTS_PATH, f"adult_san_{epsilon}.csv"), index=False)
