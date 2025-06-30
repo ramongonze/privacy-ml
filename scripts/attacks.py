@@ -9,7 +9,7 @@ from datetime import datetime
 import os
 import pickle
 
-REPOSITORY_PATH = "/Users/ramongonze/phd/courses/privacidade_ml/privacy-ml" # privacy-ml repository path
+REPOSITORY_PATH = "/home/ramongonze/phd/privacy-ml" # privacy-ml repository path
 RESULTS_PATH = os.path.join(REPOSITORY_PATH, "results")
 log = lambda msg : print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
@@ -23,7 +23,7 @@ def attack(dataset, qids, target, sensitive):
         sensitive (str): Sensitive attribute.        
     """
     # Original dataset path
-    dataset_path = os.path.join(REPOSITORY_PATH, f"data/{dataset}/{dataset}_pp.csv")
+    data_ori = pd.read_csv(os.path.join(REPOSITORY_PATH, f"data/{dataset}/{dataset}_pp.csv"))
     
     results_path = os.path.join(RESULTS_PATH, "privacy_evaluation.csv")
 
@@ -68,7 +68,7 @@ def attack(dataset, qids, target, sensitive):
 
                         try:
                             acc = model_inversion_acc(
-                                dataset_path=dataset_path,
+                                data_ori=data_ori,
                                 qids=qids,
                                 target=target,
                                 sensitive=sensitive,

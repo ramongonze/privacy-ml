@@ -1,5 +1,6 @@
 """Evaluate the performance of the attack model."""
 
+import gc
 import math
 import functools
 import numpy as np
@@ -65,7 +66,7 @@ def process_y(y:pd.Series):
     return label_encoder, y_processed
 
 def model_inversion_acc(
-        dataset_path:str,
+        data_ori:pd.DataFrame,
         qids:list[str],
         target:str,
         sensitive:str,
@@ -90,7 +91,6 @@ def model_inversion_acc(
         accuracy (float): Adversary's accuracy.
     """
     # Load original dataset (pre-processed)
-    data_ori = pd.read_csv(dataset_path)
     domain_sensitive = data_ori[sensitive].unique().tolist()
     n = len(data_ori) # Number of individuals
 
