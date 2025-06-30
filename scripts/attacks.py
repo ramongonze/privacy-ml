@@ -9,7 +9,7 @@ from datetime import datetime
 import os
 import pickle
 
-REPOSITORY_PATH = "/home/ramongonze/phd/privacy-ml" # privacy-ml repository path
+REPOSITORY_PATH = "/Users/ramongonze/phd/courses/privacidade_ml/privacy-ml" # privacy-ml repository path
 RESULTS_PATH = os.path.join(REPOSITORY_PATH, "results")
 log = lambda msg : print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
 
@@ -24,6 +24,10 @@ def attack(dataset, qids, target, sensitive):
     """
     # Original dataset path
     data_ori = pd.read_csv(os.path.join(REPOSITORY_PATH, f"data/{dataset}/{dataset}_pp.csv"))
+
+    if dataset == "hospitals":
+        np.random.seed(78923465)
+        data_ori = data_ori.sample(50000)
     
     results_path = os.path.join(RESULTS_PATH, "privacy_evaluation.csv")
 
@@ -50,7 +54,7 @@ def attack(dataset, qids, target, sensitive):
             noise, ep = noise
             ep = f"{ep:.1f}"
 
-        for M_name in tqdm(ml_models, desc="Target Model", leave=False):
+        for M_name in tqdm(["naive_bayes", "logistic_regression"], desc="Target Model", leave=False):
             # Load M
             try:
                 with open(
@@ -77,11 +81,12 @@ def attack(dataset, qids, target, sensitive):
                                 dp_output=(noise == "output"),
                                 epsilon=ep
                             )
+
+                            with open(results_path, "a") as file:
+                                file.write(f"{dataset},{noise},{ep},{M_name},{A_name},{acc:.10f}\n")
+
                         except Exception as e:
                             print(f"Error at {dataset},{noise},{ep},{M_name},{A_name}\nError: {e}\n")  
-                        
-                        with open(results_path, "a") as file:
-                            file.write(f"{dataset},{noise},{ep},{M_name},{A_name},{acc:.10f}\n")
                     except Exception as e:
                         print(f"Error loading A: {dataset},{noise},{ep},{M_name},{A_name}\nError: {e}\n")
             except Exception as e:

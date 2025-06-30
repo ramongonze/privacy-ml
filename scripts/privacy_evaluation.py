@@ -95,13 +95,13 @@ def model_inversion_acc(
     n = len(data_ori) # Number of individuals
 
     X_M = data_ori[qids].copy()
-    X_M = X_M.loc[X_M.index.repeat(len(domain_sensitive))] # Duplicate each individual k k = |domain(sensitive)| times
+    X_M = X_M.loc[X_M.index.repeat(len(domain_sensitive))] # Duplicate each individual k = |domain(sensitive)| times
     X_M[sensitive] = domain_sensitive * n # Add all possible sensitive values to each duplicate of each individual
     
     # Process the fetaures to be in the same format as the model
-    X_M = process_x(X_M)
+    X_M_processed = process_x(X_M)
 
-    y_M_conf = M.predict_proba(X_M)
+    y_M_conf = M.predict_proba(X_M_processed)
     y_M_pred = np.argmax(y_M_conf, axis=1)
 
     if dp_output:
@@ -117,11 +117,9 @@ def model_inversion_acc(
     # Get predictions and confidences for the sensitive attribute
     
     # Build the dataset to pass through A
-    X_A = data_ori[qids].copy()
-    X_A = X_A.loc[X_A.index.repeat(len(domain_sensitive))] # Duplicate each individual k = |domain(sensitive)| times
-    X_A[target] = y_M_pred # Predictions from M
+    X_M[target] = y_M_pred # Predictions from M
 
-    X_A = process_x(X_A)
+    X_A = process_x(X_M[qids + [target]])
     y_A_conf = A.predict_proba(X_A)
     y_A_pred = np.argmax(y_A_conf, axis=1)
 
@@ -129,15 +127,12 @@ def model_inversion_acc(
     label_encoder, _ = process_y(data_ori[sensitive])
     y_A_pred = label_encoder.inverse_transform(y_A_pred)
 
-    correct_guesses = 0
+    guesses = []
     for i in np.arange(n):
         y_A_conf_ind = y_A_conf[i*len(domain_sensitive):(i+1)*len(domain_sensitive)]
         y_A_conf_ind = np.max(y_A_conf_ind, axis=1)
         y_A_pred_ind = y_A_pred[i*len(domain_sensitive):(i+1)*len(domain_sensitive)]
-        y_original = data_ori.loc[i][sensitive]
-        guess = make_guess(y_A_pred_ind, y_A_conf_ind)
-        if guess == y_original:
-            correct_guesses += 1
-
-    accuracy = correct_guesses/n
+        guesses.append(make_guess(y_A_pred_ind, y_A_conf_ind))
+    
+    accuracy = sum(np.array(guesses) == data_ori[sensitive])/n
     return accuracy
