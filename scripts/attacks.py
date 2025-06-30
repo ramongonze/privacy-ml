@@ -54,11 +54,19 @@ def attack(dataset, qids, target, sensitive):
             noise, ep = noise
             ep = f"{ep:.1f}"
 
-        for M_name in tqdm(["naive_bayes", "logistic_regression"], desc="Target Model", leave=False):
+        for M_name in tqdm(["random_forest", "naive_bayes", "logistic_regression"], desc="Target Model", leave=False):
             # Load M
             try:
+                # The model M for "output" is always the same
+                if noise == "output":
+                    noise_m = "none"
+                    ep_m = "None"
+                else:
+                    noise_m = noise
+                    ep_m = ep
+                
                 with open(
-                    os.path.join(RESULTS_PATH, f"target_models/{M_name}/{dataset}_{noise}_eps_{ep}.pkl"), 'rb'
+                    os.path.join(RESULTS_PATH, f"target_models/{M_name}/{dataset}_{noise_m}_eps_{ep_m}.pkl"), 'rb'
                 ) as file:
                     M = pickle.load(file)
 
