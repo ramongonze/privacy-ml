@@ -1,138 +1,139 @@
-"""Evaluate the performance of the attack model."""
 
-import gc
-import math
-import functools
+"""
+Evaluate the performance of the attack model using vectorized operations.
+This script relies on a pre-saved DataManager object from the training pipeline
+to ensure consistent data preprocessing.
+"""
+
 import numpy as np
 import pandas as pd
-from mechanisms import krr
-from tqdm.auto import tqdm
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
-from sklearn.compose import ColumnTransformer
-import sys
-import os
 
-REPOSITORY_PATH = "/home/ramongonze/phd/privacy-ml" # privacy-ml repository path
-
-def max_isclose(iterable, *, rel_tol=1e-9, abs_tol=0.0):
-    key = functools.cmp_to_key(
-        lambda x, y: (
-            0 if math.isclose(x, y, rel_tol=rel_tol, abs_tol=abs_tol)
-            else -1 if x < y else 1
-        )
-    )
-    return max(iterable, key=key)
-
-def make_guess(predictions:list, confidences:list[float]):
-    """Adversary's guess when she has a list of predictions for the sensitive attribute and the model's confidences for each prediction.
+# This mechanism is also used in unified_train.py
+def krr(original_value, domain, epsilon: float):
+    """k-Randomized Response mechanism."""
+    k = len(domain)
+    if k <= 1: return original_value
+    p = np.exp(epsilon) / (np.exp(epsilon) + k - 1)
     
-    Takes the value with the maximum confidence. If there are more than 2 
-    
-    Parameters:
-        predictions (list): List of predictions (attribute values) for the sensitive attribute.
-        confidences (list[float]): Model's confidence for each prediction (list of floats).
-
-    Returns:
-        guess (any): Adversary's guess.
-    """
-    maximum_confidence = max_isclose(confidences)
-    candidates = []
-    for i in np.arange(len(predictions)):
-        if math.isclose(confidences[i], maximum_confidence):
-            candidates.append(predictions[i])
-    
-    # Choose randomly one value from the argmax set
-    return np.random.choice(candidates)
-
-def process_x(X:pd.DataFrame):
-    # Create preprocessors
-    categorical_cols = X.select_dtypes(include=['object']).columns
-    numerical_cols = X.select_dtypes(include=['int64', 'float64']).columns
-
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', StandardScaler(), numerical_cols),
-            ('cat', OneHotEncoder(drop='first', sparse_output=False, handle_unknown='ignore'), categorical_cols)
-        ])
-    preprocessor.fit(X)
-    X_processed = preprocessor.transform(X)
-    return X_processed
-
-def process_y(y:pd.Series):
-    # Fit preprocessors on original data
-    label_encoder = LabelEncoder()
-    label_encoder.fit(y)
-    y_processed = label_encoder.transform(y)
-    return label_encoder, y_processed
+    if np.random.random() < p:
+        return original_value
+    else:
+        other_options = [v for v in domain if v != original_value]
+        return np.random.choice(other_options)
 
 def model_inversion_acc(
-        data_ori:pd.DataFrame,
-        qids:list[str],
-        target:str,
-        sensitive:str,
-        M,
-        A,
-        dp_output=False,
-        epsilon=None
+        data_ori: pd.DataFrame,
+        qids: list[str],
+        target_col: str,
+        sensitive_col: str,
+        utility_model,
+        attack_model,
+        data_manager,
+        dataset_name: str,
+        dp_output: bool = False,
+        epsilon: float = None
     ):
-    """Adversary's accuracy when trying to guess the sensitive attribute value. The evaluation is done considering all individuals in the original dataset as possible targets. The accuracy is the number of individuals the adversary guessed correctly the sensitive attribute using the attack model.
+    """
+    Calculates model inversion attack accuracy using efficient, vectorized operations.
+
+    The adversary's goal is to guess the sensitive attribute of a target individual,
+    knowing their QIDs and having black-box access to the target model M.
+
+    The process is:
+    1. For each individual, create `k` hypothetical records, where `k` is the
+       number of possible values for the sensitive attribute. Each record has the
+       individual's true QIDs but a different hypothetical sensitive value.
+    2. Feed all `n * k` hypothetical records into the utility model (M) to get
+       `n * k` predictions for the target attribute.
+    3. Feed these `n * k` records (QIDs + M's prediction) into the attack model (A)
+       to get `n * k` confidence scores for each possible sensitive value.
+    4. For each individual, find which of the `k` initial hypotheses yields the
+       highest confidence score from the attack model. This becomes the guess.
+    5. Compare the guesses against the true sensitive values to get the accuracy.
 
     Parameters:
-        dataset_path (str): Original dataset path (pre-processed).
-        qids (list[str]): List of quasi-identifiers.
-        target (str): Target attribute for the machine learning model.
-        sensitive (str): Sensitive attribute.
-        M: Target model. It must implement the method 'predict' that returns, for each instance, an array of confidences (same order as 'domain_sensitive').
-        A: Attack model. It must implement the method 'predict' that returns, for each instance, an array of confidences (same order as 'domain_sensitive').
-        dp_output (bool): Whether to apply noise in the prediction of M. The noise is going to be added using kRR mechanism and the privacy level is passed through parameter `epsilon`.Default is False.
-        epsilon (float): Privacy parameter. Is is used only when `dp_output`=True.
+        data_ori (pd.DataFrame): Original dataset of individuals to attack.
+        qids (list[str]): List of quasi-identifier column names.
+        target_col (str): The name of the target attribute column for M.
+        sensitive_col (str): The name of the sensitive attribute column.
+        utility_model: The trained target model (M).
+        attack_model: The trained attack model (A).
+        data_manager: The loaded DataManager object with fitted preprocessors.
+        dataset_name (str): The name of the dataset ('adult' or 'hospitals').
+        dp_output (bool): If True, apply k-RR to M's output.
+        epsilon (float): Epsilon for k-RR if dp_output is True.
 
     Returns:
-        accuracy (float): Adversary's accuracy.
+        float: The adversary's accuracy.
     """
-    # Load original dataset (pre-processed)
-    domain_sensitive = data_ori[sensitive].unique().tolist()
-    n = len(data_ori) # Number of individuals
+    # --- 1. SETUP ---
+    n = len(data_ori)
+    if n == 0:
+        return 0.0
 
-    X_M = data_ori[qids].copy()
-    X_M = X_M.loc[X_M.index.repeat(len(domain_sensitive))] # Duplicate each individual k = |domain(sensitive)| times
-    X_M[sensitive] = domain_sensitive * n # Add all possible sensitive values to each duplicate of each individual
+    # Get objects from the DataManager for consistent processing
+    utility_preprocessor = data_manager.utility_preprocessors[dataset_name]
+    attack_preprocessor = data_manager.attack_preprocessors[dataset_name]
+    le_utility = data_manager.utility_label_encoders[dataset_name]
+    le_sensitive = data_manager.sensitive_label_encoders[dataset_name]
+    domain_sensitive = le_sensitive.classes_
+    k = len(domain_sensitive)
+
+    # --- 2. CREATE HYPOTHETICAL RECORDS for UTILITY MODEL (M) ---
+    # Create a dataframe with n * k rows for all hypothetical scenarios
+    # This is more memory-efficient than repeating a pandas DataFrame
+    qids_repeated = pd.DataFrame(np.repeat(data_ori[qids].values, k, axis=0), columns=qids)
+    sensitive_tiled = pd.Series(np.tile(domain_sensitive, n), name=sensitive_col)
     
-    # Process the fetaures to be in the same format as the model
-    X_M_processed = process_x(X_M)
+    # The utility model's input features include QIDs and the sensitive attribute
+    X_M_raw = pd.concat([qids_repeated, sensitive_tiled], axis=1)
 
-    y_M_conf = M.predict_proba(X_M_processed)
-    y_M_pred = np.argmax(y_M_conf, axis=1)
+    # --- 3. PREDICT WITH UTILITY MODEL (M) ---
+    X_M_processed = utility_preprocessor.transform(X_M_raw)
+    y_M_pred_encoded = utility_model.predict(X_M_processed)
+
+    y_M_pred_decoded = le_utility.inverse_transform(y_M_pred_encoded)
 
     if dp_output:
         if isinstance(epsilon, str):
             epsilon = float(epsilon)
-        y_M_pred = [krr(c, M.classes_, epsilon) for c in y_M_pred]
+        
+        # Apply k-Randomized Response to the decoded predictions
+        y_M_pred_decoded = np.array([krr(p, le_utility.classes_, epsilon) for p in y_M_pred_decoded])
 
-    # Get the predictions to the original domain
-    label_encoder, _ = process_y(data_ori[target])
-    y_M_pred = label_encoder.inverse_transform(y_M_pred)
+    # Decode predictions back to original labels (e.g., '<=50K')
+    y_M_pred_decoded = le_utility.inverse_transform(y_M_pred_encoded)
 
-    # STEP 4 #############
-    # Get predictions and confidences for the sensitive attribute
+
+
+    # --- 4. CREATE INPUTS for ATTACK MODEL (A) ---
+    # The attack model's input features are QIDs and the utility model's prediction
+    X_A_raw = qids_repeated.copy() # Use .copy() to avoid SettingWithCopyWarning
+    X_A_raw[target_col] = y_M_pred_decoded
     
-    # Build the dataset to pass through A
-    X_M[target] = y_M_pred # Predictions from M
+    # --- 5. PREDICT WITH ATTACK MODEL (A) ---
+    X_A_processed = attack_preprocessor.transform(X_A_raw)
+    # Get confidence scores for each possible sensitive value
+    y_A_confidences = attack_model.predict_proba(X_A_processed) # Shape: (n * k, k)
 
-    X_A = process_x(X_M[qids + [target]])
-    y_A_conf = A.predict_proba(X_A)
-    y_A_pred = np.argmax(y_A_conf, axis=1)
+    # --- 6. VECTORIZED GUESSING ---
+    # Reshape confidences to (n, k, k): (individual, hypothesis, confidence_for_each_class)
+    conf_matrix = y_A_confidences.reshape(n, k, k)
 
-    # Get the predictions to the original domain
-    label_encoder, _ = process_y(data_ori[sensitive])
-    y_A_pred = label_encoder.inverse_transform(y_A_pred)
+    # For each individual, we want the confidence score for the value we hypothesized.
+    # e.g., for hypothesis 0 (e.g., 'White'), what's the confidence for 'White'?
+    # This corresponds to the diagonal of the inner (k, k) matrices.
+    # `conf_for_hypotheses` will have shape (n, k)
+    conf_for_hypotheses = np.diagonal(conf_matrix, axis1=1, axis2=2)
 
-    guesses = []
-    for i in np.arange(n):
-        y_A_conf_ind = y_A_conf[i*len(domain_sensitive):(i+1)*len(domain_sensitive)]
-        y_A_conf_ind = np.max(y_A_conf_ind, axis=1)
-        y_A_pred_ind = y_A_pred[i*len(domain_sensitive):(i+1)*len(domain_sensitive)]
-        guesses.append(make_guess(y_A_pred_ind, y_A_conf_ind))
+    # For each individual, find which hypothesis (0 to k-1) yielded the max confidence
+    best_guess_indices = np.argmax(conf_for_hypotheses, axis=1) # Shape: (n,)
+
+    # Convert indices back to actual class labels (e.g., 'White', 'Black')
+    guesses = le_sensitive.classes_[best_guess_indices]
     
-    accuracy = sum(np.array(guesses) == data_ori[sensitive])/n
+    # --- 7. CALCULATE ACCURACY ---
+    true_values = data_ori[sensitive_col].values
+    accuracy = np.mean(guesses == true_values)
+    
     return accuracy
